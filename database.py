@@ -2,6 +2,8 @@ import motor.motor_asyncio
 import random
 from bson.objectid import ObjectId
 import config as con
+from loguru import logger
+import re
 
 number = random.randint(1, 100)
 
@@ -15,23 +17,43 @@ collection_backet = db['basket']
 collection_orders = db['orders']
 
 
+async def is_valid_email(email):
+    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+    return re.match(pattern, email) is not None
+
+
 async def registration(user):
+    users = await get_all_users()
+    response = await is_valid_email(user.email)
+    if not response:
+        return {'status': 400, 'message': 'неккоректные данные'}
+    users = users['users']
+    for i in users:
+        if user.login == i['login'] or user.email == i['email']:
+            return {'status': 409, 'message': 'пользователь с такой почтой или логином уже существует'}
+
     await  collection_users.insert_one(
         {"email": user.email, 'login': user.login, 'password': user.password})
-    print('пользователь успешно добавлен')
+    logger.debug('Пользователь успешно зарегистрирован')
+    user_id = await collection_users.find_one({'login': user.login})
+    user_id = user_id['_id']
+    await create_basket(user_id)
+    await create_orders(user_id)
+
+    return {'status': 200, 'message': 'пользователь успешно зарегистрирован'}
 
 
 async def get_all_users():
     users = await collection_users.find().to_list(None)
     for user in users:
         user['_id'] = str(user['_id'])
-    return users
+    return {'status': 200, 'users': users}
 
 
 async def add_product(product_id, product, price, quantity):
     await collection_products.insert_one(
         {'_id': product_id, 'product_name': product, 'price': price, 'quantity': quantity})
-    print('продукт добавлен в список')
+    logger.debug('продукт добавлен в список')
 
 
 async def get_products():
@@ -52,12 +74,11 @@ async def reduce_product_stock(products):
 
 async def create_basket(user_id):
     await collection_backet.insert_one({'_id': user_id, 'basket': []})
-    print('корзина успешно создалась')
 
 
 async def checkCondition(basket_id, product, response):
     basket = await get_basket(basket_id)
-
+    basket = basket['basket']
     obj_id = ObjectId(basket_id)
     count = -1
 
@@ -73,88 +94,101 @@ async def checkCondition(basket_id, product, response):
 
 async def check_quantity_product(basket_id, product, response):
     basket = await get_basket(basket_id)
+    basket = basket['basket']
     for i in basket['basket']:
         total = i['quantity'] + product.quantity
         if i['product_id'] == product.product_id:
             if response['quantity'] < total:
                 return True
+    if response['quantity']<product.quantity:
+        return True
 
 
 async def add_in_basket(basket_id, product):
-    obj_id = ObjectId(basket_id)
-    response = await collection_products.find_one({'_id': product.product_id})
-    if not response:
-        return 'Товар не найдем'
-    if product.quantity <= 0:
-        return 'количество товара не указано или указано неверно'
-    check_quantity = await check_quantity_product(basket_id, product, response)
-    if check_quantity:
-        return 'Недостаточно товара'
-    result = await checkCondition(basket_id, product, response)
-    if result:
-        return 'Товар добавился в корзину'
+    try:
+        if type(product.product_id) != int or product.product_id is None:
+            return {'status': 400, 'message': 'product_id указан некорректно'}
+        obj_id = ObjectId(basket_id)
+        response = await collection_products.find_one({'_id': product.product_id})
+        if not response:
+            return {'status': 404, 'message': 'товар не найден'}
+        if product.quantity <= 0 or type(product.quantity) != int:
+            return {'status': 400, 'message': 'количество товара указанно некорректно'}
+        check_quantity = await check_quantity_product(basket_id, product, response)
+        if check_quantity:
+            return {'staus': 409, 'message': 'Недостаточно товара'}
+        result = await checkCondition(basket_id, product, response)
+        if result:
+            return {'status': 200, 'message': 'Товар добавился в корзину'}
 
-    price = await collection_products.find_one({'_id': product.product_id})
-    price = price['price']
-    await collection_backet.update_one({'_id': obj_id},
-                                       {'$push': {'basket': {'product_id': product.product_id, 'price': price,
-                                                             'quantity': product.quantity}}})
-    return 'Товар добавлен'
+        price = await collection_products.find_one({'_id': product.product_id})
+        price = price['price']
+        await collection_backet.update_one({'_id': obj_id},
+                                           {'$push': {'basket': {'product_id': product.product_id, 'price': price,
+                                                                 'quantity': product.quantity}}})
+        return {'status': 200, 'message': 'Товар добавлен'}
+    except:
+        return {'status': 404, 'message': 'корзины с таким id не удаётся найти'}
 
 
 async def get_basket(basket_id):
-    obj_id = ObjectId(basket_id)
-    basket = await collection_backet.find_one({'_id': obj_id})
-    basket['_id'] = str(basket['_id'])
-    return basket
+    try:
+        obj_id = ObjectId(basket_id)
+        basket = await collection_backet.find_one({'_id': obj_id})
+
+        basket['_id'] = str(basket['_id'])
+        return {'status': 200, 'basket': basket}
+    except:
+        return {'status': 404, 'message': 'корзины с таким id не существует'}
 
 
 async def update_backet(basket_id):
     obj_id = ObjectId(basket_id)
     result = await collection_backet.update_one({'_id': obj_id}, {'$set': {'basket': []}})
-    print('корзина обновлена')
+    logger.debug('корзина обновлена')
 
 
 async def create_orders(order_id):
     await collection_orders.insert_one({'_id': order_id, 'orders': []})
-    print('заказы успешно создались')
+    logger.debug('заказы успешно создались')
 
 
 async def add_order(order_id):
-    obj_id = ObjectId(order_id)
     total_price = 0
-    order = await get_basket(order_id)
-    for i in order['basket']:
+    basket = await get_basket(order_id)
+    if basket['status'] == 404:
+        return {'status': 404, 'message': 'заказа с таким id не существует'}
+    basket = basket['basket']
+    if len(basket['basket']) == 0:
+        return {'status': 404, 'message': 'корзина пуста'}
+    obj_id = ObjectId(order_id)
+
+    for i in basket['basket']:
         total_price += i['price'] * i['quantity']
     await collection_orders.update_one({'_id': obj_id},
                                        {'$push': {'orders': {'order_id': number, 'total_price': total_price,
-                                                             'order': order['basket']}}})
+                                                             'order': basket['basket']}}})
     await getOrderedQuantity(order_id)
 
     await update_backet(order_id)
-    return 'заказ успешно создан'
+    return {'status': 200, 'message': 'заказ успешно создан'}
 
 
 async def get_order(orders_id):
-    obj_id = ObjectId(orders_id)
-    orders = await collection_orders.find_one(obj_id)
-    orders['_id'] = str(orders['_id'])
-    return orders
+    try:
+        obj_id = ObjectId(orders_id)
+        orders = await collection_orders.find_one(obj_id)
+        orders['_id'] = str(orders['_id'])
+        return {"status": 200, 'orders': orders}
+    except:
+        return {'status': 404, 'message': 'заказ с таким id был не найден'}
 
 
 async def getOrderedQuantity(order_id):
     order = await get_basket(order_id)
+    order = order['basket']
     for i in order['basket']:
         product_id = i['product_id']
         quantity = i['quantity']
         result = await collection_products.update_one({'_id': product_id}, {'$inc': {'quantity': -quantity}})
-        print(result)
-    print('товары вычтены')
-
-
-async def create_user(user):
-    await registration(user)
-    user_id = await collection_users.find_one({'login': user.login})
-    user_id = user_id['_id']
-    await create_basket(user_id)
-    await create_orders(user_id)
+    logger.debug('товары вычтены')
