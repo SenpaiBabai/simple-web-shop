@@ -1,6 +1,8 @@
 import motor.motor_asyncio
 import random
 from bson.objectid import ObjectId
+from fastapi import HTTPException
+
 import config as con
 from loguru import logger
 import re
@@ -26,11 +28,11 @@ async def registration(user):
     users = await get_all_users()
     response = await is_valid_email(user.email)
     if not response:
-        return {'status': 400, 'message': 'неккоректные данные'}
+        raise HTTPException(status_code=404, detail="incorrect data")
     users = users['users']
     for i in users:
         if user.login == i['login'] or user.email == i['email']:
-            return {'status': 409, 'message': 'пользователь с такой почтой или логином уже существует'}
+            raise HTTPException(status_code=404, detail="пользователь с такой почтой или логином уже существует")
 
     await  collection_users.insert_one(
         {"email": user.email, 'login': user.login, 'password': user.password})
@@ -40,14 +42,17 @@ async def registration(user):
     await create_basket(user_id)
     await create_orders(user_id)
 
-    return {'status': 200, 'message': 'пользователь успешно зарегистрирован'}
+    return {'detail': 'пользователь успешно зарегистрирован'}
 
 
 async def get_all_users():
-    users = await collection_users.find().to_list(None)
-    for user in users:
-        user['_id'] = str(user['_id'])
-    return {'status': 200, 'users': users}
+    try:
+        users = await collection_users.find().to_list(None)
+        for user in users:
+            user['_id'] = str(user['_id'])
+        return {'users': users}
+    except:
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 async def add_product(product_id, product, price, quantity):
@@ -63,13 +68,13 @@ async def get_products():
     return products
 
 
-async def reduce_product_stock(products):
-    print(list(products)[0])
-    for i in products:
-        name_product, quantity = i[0], i[1]
-        if quantity is None:
-            print('nety')
-        print(name_product, quantity)
+# async def reduce_product_stock(products):
+#     print(list(products)[0])
+#     for i in products:
+#         name_product, quantity = i[0], i[1]
+#         if quantity is None:
+#             print('nety')
+#         print(name_product, quantity)
 
 
 async def create_basket(user_id):
@@ -100,35 +105,36 @@ async def check_quantity_product(basket_id, product, response):
         if i['product_id'] == product.product_id:
             if response['quantity'] < total:
                 return True
-    if response['quantity']<product.quantity:
+    if response['quantity'] < product.quantity:
         return True
 
 
 async def add_in_basket(basket_id, product):
-    try:
+    # try:
+        await get_basket(basket_id)
         if type(product.product_id) != int or product.product_id is None:
-            return {'status': 400, 'message': 'product_id указан некорректно'}
+            raise HTTPException(status_code=404, detail="Basket not found")
         obj_id = ObjectId(basket_id)
         response = await collection_products.find_one({'_id': product.product_id})
         if not response:
-            return {'status': 404, 'message': 'товар не найден'}
+            raise HTTPException(status_code=404, detail="incorrect data")
         if product.quantity <= 0 or type(product.quantity) != int:
-            return {'status': 400, 'message': 'количество товара указанно некорректно'}
+            raise HTTPException(status_code=400, detail="количество товара указанно некорректно")
         check_quantity = await check_quantity_product(basket_id, product, response)
         if check_quantity:
-            return {'staus': 409, 'message': 'Недостаточно товара'}
+            raise HTTPException(status_code=409, detail="Недостаточно товара")
         result = await checkCondition(basket_id, product, response)
         if result:
-            return {'status': 200, 'message': 'Товар добавился в корзину'}
+            return {'message': 'Товар добавился в корзину'}
 
         price = await collection_products.find_one({'_id': product.product_id})
         price = price['price']
         await collection_backet.update_one({'_id': obj_id},
                                            {'$push': {'basket': {'product_id': product.product_id, 'price': price,
                                                                  'quantity': product.quantity}}})
-        return {'status': 200, 'message': 'Товар добавлен'}
-    except:
-        return {'status': 404, 'message': 'корзины с таким id не удаётся найти'}
+        return {'message': 'Товар добавлен'}
+    # except:
+    #     raise HTTPException(status_code=404, detail="incorrect data")
 
 
 async def get_basket(basket_id):
@@ -137,9 +143,9 @@ async def get_basket(basket_id):
         basket = await collection_backet.find_one({'_id': obj_id})
 
         basket['_id'] = str(basket['_id'])
-        return {'status': 200, 'basket': basket}
+        return {'basket': basket}
     except:
-        return {'status': 404, 'message': 'корзины с таким id не существует'}
+        raise HTTPException(status_code=404, detail="Basket not found")
 
 
 async def update_backet(basket_id):
@@ -156,11 +162,9 @@ async def create_orders(order_id):
 async def add_order(order_id):
     total_price = 0
     basket = await get_basket(order_id)
-    if basket['status'] == 404:
-        return {'status': 404, 'message': 'заказа с таким id не существует'}
     basket = basket['basket']
     if len(basket['basket']) == 0:
-        return {'status': 404, 'message': 'корзина пуста'}
+        raise HTTPException(status_code=404, detail="корзина пуста")
     obj_id = ObjectId(order_id)
 
     for i in basket['basket']:
@@ -171,7 +175,7 @@ async def add_order(order_id):
     await getOrderedQuantity(order_id)
 
     await update_backet(order_id)
-    return {'status': 200, 'message': 'заказ успешно создан'}
+    return {'message': 'заказ успешно создан'}
 
 
 async def get_order(orders_id):
@@ -179,9 +183,9 @@ async def get_order(orders_id):
         obj_id = ObjectId(orders_id)
         orders = await collection_orders.find_one(obj_id)
         orders['_id'] = str(orders['_id'])
-        return {"status": 200, 'orders': orders}
+        return {'orders': orders}
     except:
-        return {'status': 404, 'message': 'заказ с таким id был не найден'}
+        raise HTTPException(status_code=404, detail="заказ с таким id  не был найден")
 
 
 async def getOrderedQuantity(order_id):
@@ -190,5 +194,5 @@ async def getOrderedQuantity(order_id):
     for i in order['basket']:
         product_id = i['product_id']
         quantity = i['quantity']
-        result = await collection_products.update_one({'_id': product_id}, {'$inc': {'quantity': -quantity}})
+        await collection_products.update_one({'_id': product_id}, {'$inc': {'quantity': -quantity}})
     logger.debug('товары вычтены')

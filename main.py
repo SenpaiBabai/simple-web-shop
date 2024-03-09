@@ -33,7 +33,7 @@ async def get_basket(basket_id):
 @app.post('/add_in_basket')
 async def add_basket(basket_id: str, product: Product):
     response = await db.add_in_basket(basket_id, product)
-    return {'status': response}
+    return  response
 
 
 @app.get('/order')
