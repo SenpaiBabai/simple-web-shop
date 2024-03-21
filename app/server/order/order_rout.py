@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.server.order.order_db import OrderRep
-from app.server.schemas import OrdersModel, OrderCollections
+from app.server.order.order_db import OrderRep, RabitMQ
+from app.server.schemas import OrdersModel, OrderCollections, Order
 
 router = APIRouter(
     prefix="/orders",
@@ -28,3 +28,12 @@ async def add_order(external_id):
 async def delete_order(order_id: str):
     delete_result = await OrderRep.delete_order(order_id)
     return delete_result
+
+
+@router.get('/order_map',
+            description='Endpoint which shows the users modified orders',
+            response_model=Order)
+async def get_orders(external_id:str):
+    result=await RabitMQ.send_for_change(external_id)
+    return result
+

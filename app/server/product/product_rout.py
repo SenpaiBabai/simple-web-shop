@@ -41,13 +41,13 @@ async def create_product(product: ProductModel = Body()):
     response_model=ProductModel,
     response_model_by_alias=False,
 )
-async def update_student(product_id: str, product: UpdateProductModel = Depends()):
+async def update_product(product_id: str, product: UpdateProductModel = Depends()):
     result_update= await Products.update_product(product_id,product)
     return result_update
 
 
 @router.delete("/{product_id}", description="Enpoint which removes the product")
-async def delete_user(product_id: str):
+async def delete_product(product_id: str):
     delete_result = await Products.delete_product(product_id)
     return delete_result
 

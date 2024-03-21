@@ -14,10 +14,10 @@ class UserModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True,
                               arbitrary_types_allowed=True,
                               json_schema_extra={
-                                  'example': {
-                                      'email': 'abisus@gmail.com',
-                                      'login': 'abibus',
-                                      'password': 'bumbampup'
+                                  "example": {
+                                      "email": "abisus@gmail.com",
+                                      "login": "abibus",
+                                      "password": "bumbampup"
 
                                   }
                               }
@@ -93,3 +93,14 @@ class OrdersModel(BaseModel):
 
 class OrderCollections(BaseModel):
     orders: List[OrdersModel]
+
+
+class Product_in_order(BaseModel):
+    product_name: str
+    price: float
+    quantity: int
+
+class Order(BaseModel):
+    user_id: str
+    total_price: float
+    products: List[Product_in_order]

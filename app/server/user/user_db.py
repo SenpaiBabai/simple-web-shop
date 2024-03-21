@@ -12,7 +12,8 @@ from fastapi.responses import Response
 class User:
     @staticmethod
     async def create_user(user: UserModel) -> UserModel:
-        check_email = await collection_users.find_one({'email': user.email})
+        print(user.model_dump())
+        check_email = await collection_users.find_one({"email": user.email})
         if check_email:
             raise HTTPException(status_code=400, detail="A user with this email already registered")
         check_login = await collection_users.find_one({'login': user.login})
@@ -27,6 +28,7 @@ class User:
     @staticmethod
     async def get_all_users()->list:
         all_users = await collection_users.find().to_list(None)
+        print(all_users)
         return all_users
 
     @staticmethod

@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
+import json
 import time
 
+import pika
 from bson import ObjectId
 from fastapi import HTTPException
 
@@ -42,7 +44,7 @@ class OrderRep:
         return orders
 
     @staticmethod
-    async def getOrderedQuantity(external_id:str):
+    async def getOrderedQuantity(external_id: str):
         basket = await Basket.get_basket(external_id)
         for i in basket['basket']:
             product_id = i['_id']
@@ -50,9 +52,9 @@ class OrderRep:
             await collection_products.update_one({'_id': ObjectId(product_id)}, {'$inc': {'quantity': -quantity}})
 
     @staticmethod
-    async def delete_order(order_id:str):
+    async def delete_order(order_id: str):
         try:
-            removed_order= await collection_orders.find_one({"_id":ObjectId(order_id)})
+            removed_order = await collection_orders.find_one({"_id": ObjectId(order_id)})
             delete_result = await collection_orders.delete_one({"_id": ObjectId(order_id)})
             if delete_result.deleted_count == 1:
                 await OrderRep.return_quantity_product(removed_order)
@@ -62,12 +64,53 @@ class OrderRep:
             raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
 
     @staticmethod
-    async def return_quantity_product(removed_order:dict):
+    async def return_quantity_product(removed_order: dict):
         try:
             for i in removed_order['products']:
-                await collection_products.find_one_and_update({'_id':ObjectId(i['id'])},{'$inc': {'quantity': i['quantity']} })
+                await collection_products.find_one_and_update({'_id': ObjectId(i['id'])},
+                                                              {'$inc': {'quantity': i['quantity']}})
         except:
             raise HTTPException(status_code=400, detail=f"Incorect data")
 
 
-# asyncio.run(OrderRep.delete_order('65f7354dd1db941ec7ceb9a6'))
+
+
+class RabitMQ:
+    @staticmethod
+    async def send_for_change(external_id: str):
+        order_map = await OrderRep.get_orders(external_id)
+        for order in order_map:
+            order['_id'] = str(order['_id'])
+
+        json_data = json.dumps(order_map)
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host='localhost'))
+        channel = connection.channel()
+
+        channel.queue_declare(queue='hello')
+
+        channel.basic_publish(exchange='', routing_key='hello', body=f'{json_data}')
+
+        connection.close()
+
+
+        changed_orders= RabitMQ.consume()
+
+        return changed_orders
+
+
+
+    @staticmethod
+    def consume():
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
+        channel = connection.channel()
+
+        channel.queue_declare(queue='message')
+        while True:
+            method_frame, header_frame, body = channel.basic_get(queue='message', auto_ack=True)
+            if body:
+                body = body.decode('utf-8')
+                json_data = json.loads(body)
+                print(json_data)
+                return json_data
+
