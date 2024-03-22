@@ -6,14 +6,12 @@ import time
 import pika
 from bson import ObjectId
 from fastapi import HTTPException
-
+import config as con
 from app.server.basket.basket_db import Basket
 from app.server.database.db_main import collection_orders, collection_products
 from app.server.schemas import OrdersModel
 
-current_time = str(time.time())
-
-hash_value = hashlib.sha256(current_time.encode()).hexdigest()
+connection_params = pika.ConnectionParameters(host=con.host)
 
 
 class OrderRep:
@@ -29,7 +27,6 @@ class OrderRep:
             total_price += i['price'] * i['quantity']
             products.append(i)
         order = OrdersModel(external_id=external_id, total_price=total_price, products=products)
-        print(order.model_dump())
         new_order = await collection_orders.insert_one(order.model_dump())
         created_user = await collection_orders.find_one({"_id": new_order.inserted_id})
         await OrderRep.getOrderedQuantity(external_id)
@@ -73,44 +70,33 @@ class OrderRep:
             raise HTTPException(status_code=400, detail=f"Incorect data")
 
 
-
-
 class RabitMQ:
     @staticmethod
-    async def send_for_change(external_id: str):
+    async def get_orders(external_id: str):
         order_map = await OrderRep.get_orders(external_id)
         for order in order_map:
             order['_id'] = str(order['_id'])
 
         json_data = json.dumps(order_map)
-        connection = pika.BlockingConnection(
-            pika.ConnectionParameters(host='localhost'))
-        channel = connection.channel()
-
-        channel.queue_declare(queue='hello')
-
-        channel.basic_publish(exchange='', routing_key='hello', body=f'{json_data}')
-
-        connection.close()
+        RabitMQ.send_to_queue(json_data)
 
 
-        changed_orders= RabitMQ.consume()
-
-        return changed_orders
-
+    @staticmethod
+    def send_to_queue(orders):
+        with pika.BlockingConnection(connection_params) as connection:
+            with connection.channel() as channel:
+                channel.queue_declare(queue=con.unprocessed_queue)
+                channel.basic_publish(exchange='', routing_key=con.unprocessed_queue, body=f'{orders}')
 
 
     @staticmethod
     def consume():
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
-        channel = connection.channel()
-
-        channel.queue_declare(queue='message')
-        while True:
-            method_frame, header_frame, body = channel.basic_get(queue='message', auto_ack=True)
-            if body:
-                body = body.decode('utf-8')
-                json_data = json.loads(body)
-                print(json_data)
-                return json_data
-
+        with pika.BlockingConnection(connection_params) as connection:
+            with connection.channel() as channel:
+                channel.queue_declare(queue=con.processed_queue)
+                while True:
+                    method_frame, header_frame, body = channel.basic_get(queue=con.processed_queue, auto_ack=True)
+                    if body:
+                        body = body.decode('utf-8')
+                        json_data = json.loads(body)
+                        return json_data

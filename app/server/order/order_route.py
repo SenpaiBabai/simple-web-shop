@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter
 
 from app.server.order.order_db import OrderRep, RabitMQ
@@ -24,7 +26,7 @@ async def add_order(external_id):
     return order
 
 
-@router.delete("/{order_id}",description='Endpoint which removes order')
+@router.delete("/{order_id}", description='Endpoint which removes order')
 async def delete_order(order_id: str):
     delete_result = await OrderRep.delete_order(order_id)
     return delete_result
@@ -33,7 +35,7 @@ async def delete_order(order_id: str):
 @router.get('/order_map',
             description='Endpoint which shows the users modified orders',
             response_model=Order)
-async def get_orders(external_id:str):
-    result=await RabitMQ.send_for_change(external_id)
+async def get_orders(external_id: str):
+    await RabitMQ.get_orders(external_id)
+    result = RabitMQ.consume()
     return result
-
