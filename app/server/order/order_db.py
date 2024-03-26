@@ -1,15 +1,13 @@
-import asyncio
-import hashlib
 import json
-import time
-
 import pika
 from bson import ObjectId
 from fastapi import HTTPException
+from kafka import KafkaConsumer, TopicPartition
 import config as con
 from app.server.basket.basket_db import Basket
 from app.server.database.db_main import collection_orders, collection_products
 from app.server.schemas import OrdersModel
+from confluent_kafka import Producer
 
 connection_params = pika.ConnectionParameters(host=con.host)
 
@@ -71,6 +69,7 @@ class OrderRep:
 
 
 class RabitMQ:
+
     @staticmethod
     async def get_orders(external_id: str):
         order_map = await OrderRep.get_orders(external_id)
@@ -100,3 +99,42 @@ class RabitMQ:
                         body = body.decode('utf-8')
                         json_data = json.loads(body)
                         return json_data
+
+
+
+class Kafka:
+    @staticmethod
+    async def get_orders(external_id: str):
+        order_map = await OrderRep.get_orders(external_id)
+        for order in order_map:
+            order['_id'] = str(order['_id'])
+
+        json_data = json.dumps(order_map)
+        Kafka.send_in_topic(json_data)
+
+    @staticmethod
+    def send_in_topic(orders):
+        producer_conf = {'bootstrap.servers': con.local_host}
+        producer = Producer(producer_conf)
+        key = con.key
+        value = f"{orders}"
+        producer.produce(con.topic, key=key.encode('utf-8'), value=value.encode('utf-8'))
+        producer.flush()
+
+
+
+    @staticmethod
+    def consume():
+        consumer = KafkaConsumer(bootstrap_servers=con.local_host, group_id=con.group_id)
+        topic_partition = TopicPartition(topic=con.topic, partition=0)
+        consumer.assign([topic_partition])
+        for msg in consumer:
+            print(msg)
+            body = msg.value
+            unicode_string = body.decode('utf-8')
+            json_data = json.loads(unicode_string)
+            consumer.commit()
+            return json_data
+
+
+

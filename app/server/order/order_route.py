@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import APIRouter
 
-from app.server.order.order_db import OrderRep, RabitMQ
+from app.server.order.order_db import OrderRep, RabitMQ, Kafka
 from app.server.schemas import OrdersModel, OrderCollections, Order
 
 router = APIRouter(
@@ -38,4 +38,13 @@ async def delete_order(order_id: str):
 async def get_orders(external_id: str):
     await RabitMQ.get_orders(external_id)
     result = RabitMQ.consume()
+    return result
+
+
+@router.get('/order_mapK',
+            description='Endpoint which shows the users modified orders',
+            response_model=Order)
+async def get_ordersK(external_id: str):
+    await Kafka.get_orders(external_id)
+    result = Kafka.consume()
     return result
